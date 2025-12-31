@@ -1,0 +1,27 @@
+{
+  "name": "signalk-cpa-tcpa-plugin",
+  "version": "0.0.1",
+  "description": "SignalK plugin for CPA/TCPA collision detection of AIS vessels",
+  "main": "index.js",
+  "scripts": {
+    "test": "node test.js"
+  },
+  "keywords": [
+    "signalk-node-server-plugin",
+    "signalk-category-ais",
+    "CPA",
+    "TCPA"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/KEGustafsson/signalk-cpa-tcpa-plugin.git"
+  },
+  "bugs": {
+    "url": "https://github.com/KEGustafsson/signalk-cpa-tcpa-plugin/issues"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "author": "Karl-Erik Gustafsson",
+  "license": "MIT"
+}

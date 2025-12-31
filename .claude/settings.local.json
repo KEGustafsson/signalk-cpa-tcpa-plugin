@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node test-collision-detector.js:*)",
+      "Bash(dir:*)",
+      "Bash(node test.js:*)",
+      "Bash(npm test:*)"
+    ]
+  }
+}

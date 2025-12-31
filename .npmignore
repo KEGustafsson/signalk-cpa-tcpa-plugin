@@ -1,0 +1,16 @@
+# Test files
+test.js
+
+# Development
+.gitignore
+.github/
+.vscode/
+.idea/
+.claude/
+
+# Documentation source
+*.md
+!README.md
+
+# Coverage
+coverage/
