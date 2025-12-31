@@ -537,9 +537,39 @@ function createCollisionDetector(app, options) {
 			const beam = app.getPath(`${vesselContext}.design.beam`);
 
 			// Extract values (getPath returns objects with 'value' and 'timestamp')
-			const posValue = position?.value || position;
-			const courseValue = courseOverGround?.value ?? courseOverGround ?? headingTrue?.value ?? headingTrue;
-			const speedValue = speedOverGround?.value ?? speedOverGround;
+			// Handle both wrapped {value, timestamp} and direct value formats
+			// Use explicit null checks to avoid treating null as falsy and falling back incorrectly
+			let posValue = null;
+			if (position !== null && position !== undefined) {
+				if (typeof position === 'object' && 'value' in position) {
+					posValue = position.value;
+				} else {
+					posValue = position;
+				}
+			}
+
+			// Extract course value - prefer COG, fallback to heading
+			let courseValue = null;
+			if (courseOverGround !== null && courseOverGround !== undefined) {
+				courseValue = typeof courseOverGround === 'object' && 'value' in courseOverGround
+					? courseOverGround.value
+					: courseOverGround;
+			}
+			if (courseValue === null || courseValue === undefined) {
+				if (headingTrue !== null && headingTrue !== undefined) {
+					courseValue = typeof headingTrue === 'object' && 'value' in headingTrue
+						? headingTrue.value
+						: headingTrue;
+				}
+			}
+
+			// Extract speed value
+			let speedValue = null;
+			if (speedOverGround !== null && speedOverGround !== undefined) {
+				speedValue = typeof speedOverGround === 'object' && 'value' in speedOverGround
+					? speedOverGround.value
+					: speedOverGround;
+			}
 
 			// Parse timestamp safely, fallback to now if invalid
 			let timestamp = Date.now();
@@ -550,7 +580,10 @@ function createCollisionDetector(app, options) {
 				}
 			}
 
-			if (!posValue) return null;
+			// Validate position exists and has valid coordinates
+			if (!posValue || typeof posValue !== 'object') return null;
+			if (typeof posValue.latitude !== 'number' || typeof posValue.longitude !== 'number') return null;
+			if (isNaN(posValue.latitude) || isNaN(posValue.longitude)) return null;
 
 			return {
 				position: posValue,
@@ -754,15 +787,18 @@ function createCollisionDetector(app, options) {
 		// Get own vessel data directly from SignalK
 		const selfVessel = getVesselData(state.selfFullContext);
 		if (!selfVessel) {
-			debugLog(`${vesselId}: Own vessel data not available`);
+			// Log at debug level with own vessel context (not target vesselId)
+			app.debug(`[CPA] ${state.selfContext}: Own vessel position data not available (no valid position from ${state.selfFullContext})`);
 			return;
 		}
 		if (!isDataFresh(selfVessel)) {
-			debugLog(`${vesselId}: Own vessel data stale (age=${((Date.now() - selfVessel.timestamp) / 1000).toFixed(0)}s)`);
+			app.debug(`[CPA] ${state.selfContext}: Own vessel data stale (age=${((Date.now() - selfVessel.timestamp) / 1000).toFixed(0)}s, max=${options.timeouts.PosFreshBefore}s)`);
 			return;
 		}
 		if (!validateVesselData(selfVessel)) {
-			debugLog(`${vesselId}: Own vessel data invalid`);
+			// Log detailed validation info to help diagnose the issue
+			const validation = validateVesselUpdate(selfVessel, options);
+			app.debug(`[CPA] ${state.selfContext}: Own vessel data validation failed: ${validation.errors.join(', ') || 'unknown error'}`);
 			return;
 		}
 
