@@ -907,18 +907,26 @@ function createCollisionDetector(app, options) {
 		const notificationPath = 'notifications.danger.collision';
 		const currentTimestamp = new Date().toISOString();
 
+		// Build notification value - use state:"normal" to clear instead of null
+		// Setting to null can cause issues with SignalK data browser
+		const notificationValue = isActive ? {
+			method: ['visual', 'sound'],
+			state: 'alarm',
+			message: `CPA/TCPA collision warning - ${Object.keys(state.collisions).length} threat(s)`,
+			source: plugin.id,
+			threats: state.collisions
+		} : {
+			state: 'normal',
+			message: 'No collision threats',
+			source: plugin.id
+		};
+
 		const buildNotificationPayload = () => ({
 			context: 'vessels.self',
 			updates: [{
 				values: [{
 					path: notificationPath,
-					value: isActive ? {
-						method: ['visual', 'sound'],
-						state: 'alarm',
-						message: `CPA/TCPA collision warning - ${Object.keys(state.collisions).length} threat(s)`,
-						source: plugin.id,
-						threats: state.collisions
-					} : null
+					value: notificationValue
 				}],
 				source: { label: plugin.id },
 				timestamp: currentTimestamp
@@ -1197,7 +1205,14 @@ plugin.stop = function () {
 				const clearPayload = {
 					context: 'vessels.self',
 					updates: [{
-						values: [{ path: 'notifications.danger.collision', value: null }],
+						values: [{
+							path: 'notifications.danger.collision',
+							value: {
+								state: 'normal',
+								message: 'Plugin stopped',
+								source: plugin.id
+							}
+						}],
 						source: { label: plugin.id },
 						timestamp: new Date().toISOString()
 					}]
