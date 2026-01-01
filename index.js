@@ -41,6 +41,12 @@ plugin.schema = {
 			description: 'How far ahead to predict collisions',
 			default: 10
 		},
+		rangeNauticalMiles: {
+			type: 'number',
+			title: 'Detection range (nautical miles)',
+			description: 'Vessels beyond this range are ignored. Set based on your typical cruising area.',
+			default: 10
+		},
 		timeouts: {
 			type: 'object',
 			title: 'Data freshness timeouts',
@@ -866,13 +872,12 @@ function createCollisionDetector(app, options) {
 			return; // Skip this update due to position jump
 		}
 
-		// Distance pre-filter
-		const maxSearchRange = options.timeWindowMinutes * 60 * DETECTION.MAX_VESSEL_SPEED_MPS * 2;
+		// Distance pre-filter - skip vessels beyond configured range
 		const distance = calculateDistance(selfVessel.position, targetVessel.position);
 
-		if (distance === null || distance > maxSearchRange) {
+		if (distance === null || distance > options.rangeMeters) {
 			state.stats.skippedOutOfRange++;
-			debugLogVessel(vesselId, `Out of range (dist=${formatDistance(distance)}, max=${formatDistance(maxSearchRange)})`);
+			debugLogVessel(vesselId, `Out of range (dist=${formatDistance(distance)}, max=${formatDistance(options.rangeMeters)})`);
 			removeCollision(vesselId);
 			return;
 		}
@@ -1114,6 +1119,16 @@ function validateOptions(options) {
 		}
 	}
 
+	if (options.rangeNauticalMiles !== undefined) {
+		if (typeof options.rangeNauticalMiles !== 'number' ||
+			isNaN(options.rangeNauticalMiles) ||
+			options.rangeNauticalMiles <= 0) {
+			errors.push('rangeNauticalMiles must be a positive number');
+		} else if (options.rangeNauticalMiles > 50) {
+			warnings.push('rangeNauticalMiles > 50 may impact performance with many AIS targets');
+		}
+	}
+
 	if (options.timeouts?.PosFreshBefore !== undefined) {
 		if (typeof options.timeouts.PosFreshBefore !== 'number' ||
 			isNaN(options.timeouts.PosFreshBefore) ||
@@ -1151,6 +1166,7 @@ plugin.start = function (options) {
 		safePassingDistanceMeters: options.safePassingDistanceMeters ?? 500,
 		alarmHysteresisMeters: options.alarmHysteresisMeters ?? 200,
 		timeWindowMinutes: options.timeWindowMinutes ?? 10,
+		rangeMeters: (options.rangeNauticalMiles ?? 10) * 1852,  // Convert nm to meters
 		timeouts: {
 			PosFreshBefore: options.timeouts?.PosFreshBefore ?? 600
 		},
@@ -1172,7 +1188,8 @@ plugin.start = function (options) {
 	app.debug(`CPA/TCPA detector initialized. Own vessel: ${ownVesselId}`);
 	app.debug(`Parameters: CPA threshold=${mergedConfig.safePassingDistanceMeters}m, ` +
 		`hysteresis=${mergedConfig.alarmHysteresisMeters}m, ` +
-		`TCPA window=${mergedConfig.timeWindowMinutes}min`);
+		`TCPA window=${mergedConfig.timeWindowMinutes}min, ` +
+		`range=${(mergedConfig.rangeMeters / 1852).toFixed(1)}nm`);
 
 	if (mergedConfig.debug.enabled) {
 		app.debug(`Debug mode ENABLED - verbose logging active`);
