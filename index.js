@@ -41,12 +41,6 @@ plugin.schema = {
 			description: 'How far ahead to predict collisions',
 			default: 10
 		},
-		maxVesselSpeedMps: {
-			type: 'number',
-			title: 'Maximum vessel speed (m/s)',
-			description: 'For validation and distance pre-filtering (51.4 m/s = 100 knots)',
-			default: 51.4
-		},
 		timeouts: {
 			type: 'object',
 			title: 'Data freshness timeouts',
@@ -162,6 +156,7 @@ const DETECTION = {
 	RELATIVE_VELOCITY_FLOOR: 0.01,       // m/s minimum for valid CPA
 
 	// Position validation bounds
+	MAX_VESSEL_SPEED_MPS: 30,            // 30 m/s ≈ 58 knots, reasonable max for filtering
 	JUMP_SPEED_FACTOR: 1.5,              // Multiplier for max allowed implied speed
 	LAT_BOUND: 90,
 	LON_BOUND: 180,
@@ -359,8 +354,6 @@ function validateVesselUpdate(vesselData, options) {
 			errors.push(`Invalid speed: NaN`);
 		} else if (vesselData.speed < 0) {
 			errors.push(`Negative speed: ${vesselData.speed}`);
-		} else if (vesselData.speed > options.maxVesselSpeedMps) {
-			errors.push(`Excessive speed: ${vesselData.speed} m/s (max: ${options.maxVesselSpeedMps})`);
 		}
 	}
 
@@ -382,7 +375,7 @@ function validateVesselUpdate(vesselData, options) {
 /**
  * Detect position jumps (GPS glitches, data errors)
  */
-function detectPositionJump(vesselData, previousData, options) {
+function detectPositionJump(vesselData, previousData) {
 	if (!previousData || !previousData.position || !previousData.timestamp) {
 		return { jumped: false };
 	}
@@ -403,7 +396,7 @@ function detectPositionJump(vesselData, previousData, options) {
 	}
 
 	const impliedSpeed = distance / timeDelta;
-	const maxAllowedSpeed = options.maxVesselSpeedMps * DETECTION.JUMP_SPEED_FACTOR;
+	const maxAllowedSpeed = DETECTION.MAX_VESSEL_SPEED_MPS * DETECTION.JUMP_SPEED_FACTOR;
 
 	if (impliedSpeed > maxAllowedSpeed) {
 		return {
@@ -626,7 +619,7 @@ function createCollisionDetector(app, options) {
 		const previousData = state.previousPositions[vesselId];
 
 		if (previousData && currentData) {
-			const jumpCheck = detectPositionJump(currentData, previousData, options);
+			const jumpCheck = detectPositionJump(currentData, previousData);
 			if (jumpCheck.jumped) {
 				state.stats.positionJumpsDetected++;
 				app.debug(`Position jump detected for ${vesselId}: ${jumpCheck.impliedSpeed.toFixed(1)} m/s`);
@@ -832,7 +825,7 @@ function createCollisionDetector(app, options) {
 		}
 
 		// Distance pre-filter
-		const maxSearchRange = options.timeWindowMinutes * 60 * options.maxVesselSpeedMps * 2;
+		const maxSearchRange = options.timeWindowMinutes * 60 * DETECTION.MAX_VESSEL_SPEED_MPS * 2;
 		const distance = calculateDistance(selfVessel.position, targetVessel.position);
 
 		if (distance === null || distance > maxSearchRange) {
@@ -1079,14 +1072,6 @@ function validateOptions(options) {
 		}
 	}
 
-	if (options.maxVesselSpeedMps !== undefined) {
-		if (typeof options.maxVesselSpeedMps !== 'number' ||
-			isNaN(options.maxVesselSpeedMps) ||
-			options.maxVesselSpeedMps <= 0) {
-			errors.push('maxVesselSpeedMps must be a positive number');
-		}
-	}
-
 	if (options.timeouts?.PosFreshBefore !== undefined) {
 		if (typeof options.timeouts.PosFreshBefore !== 'number' ||
 			isNaN(options.timeouts.PosFreshBefore) ||
@@ -1124,7 +1109,6 @@ plugin.start = function (options) {
 		safePassingDistanceMeters: options.safePassingDistanceMeters ?? 500,
 		alarmHysteresisMeters: options.alarmHysteresisMeters ?? 200,
 		timeWindowMinutes: options.timeWindowMinutes ?? 10,
-		maxVesselSpeedMps: options.maxVesselSpeedMps ?? 51.4,
 		timeouts: {
 			PosFreshBefore: options.timeouts?.PosFreshBefore ?? 600
 		},
@@ -1146,8 +1130,7 @@ plugin.start = function (options) {
 	app.debug(`CPA/TCPA detector initialized. Own vessel: ${ownVesselId}`);
 	app.debug(`Parameters: CPA threshold=${mergedConfig.safePassingDistanceMeters}m, ` +
 		`hysteresis=${mergedConfig.alarmHysteresisMeters}m, ` +
-		`TCPA window=${mergedConfig.timeWindowMinutes}min, ` +
-		`max speed=${mergedConfig.maxVesselSpeedMps}m/s`);
+		`TCPA window=${mergedConfig.timeWindowMinutes}min`);
 
 	if (mergedConfig.debug.enabled) {
 		app.debug(`Debug mode ENABLED - verbose logging active`);
