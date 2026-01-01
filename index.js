@@ -446,6 +446,39 @@ function createCollisionDetector(app, options) {
 		logVesselDetails: options.debug?.logVesselDetails ?? false
 	};
 
+	// ANSI color codes for vessel-specific debug output
+	const VESSEL_COLORS = [
+		'\x1b[36m',  // Cyan
+		'\x1b[33m',  // Yellow
+		'\x1b[35m',  // Magenta
+		'\x1b[32m',  // Green
+		'\x1b[34m',  // Blue
+		'\x1b[91m',  // Bright Red
+		'\x1b[92m',  // Bright Green
+		'\x1b[93m',  // Bright Yellow
+		'\x1b[94m',  // Bright Blue
+		'\x1b[95m',  // Bright Magenta
+		'\x1b[96m',  // Bright Cyan
+	];
+	const COLOR_RESET = '\x1b[0m';
+	const vesselColorMap = {};
+
+	/**
+	 * Get consistent color for a vessel ID
+	 */
+	function getVesselColor(vesselId) {
+		if (!vesselColorMap[vesselId]) {
+			// Simple hash to assign color
+			let hash = 0;
+			for (let i = 0; i < vesselId.length; i++) {
+				hash = ((hash << 5) - hash) + vesselId.charCodeAt(i);
+				hash = hash & hash;
+			}
+			vesselColorMap[vesselId] = VESSEL_COLORS[Math.abs(hash) % VESSEL_COLORS.length];
+		}
+		return vesselColorMap[vesselId];
+	}
+
 	/**
 	 * Debug logging helper - only logs when debug is enabled
 	 */
@@ -459,16 +492,25 @@ function createCollisionDetector(app, options) {
 	}
 
 	/**
-	 * Log detailed vessel info
+	 * Debug logging with vessel color coding
 	 */
-	function logVesselInfo(label, vesselData) {
+	function debugLogVessel(vesselId, message) {
+		if (!debugConfig.enabled) return;
+		const color = getVesselColor(vesselId);
+		app.debug(`[CPA] ${color}${vesselId}${COLOR_RESET}: ${message}`);
+	}
+
+	/**
+	 * Log detailed vessel info with color coding
+	 */
+	function logVesselInfo(vesselId, vesselData) {
 		if (!debugConfig.enabled || !debugConfig.logVesselDetails) return;
 		if (!vesselData) {
-			debugLog(`${label}: no data`);
+			debugLogVessel(vesselId, `no data`);
 			return;
 		}
 		const age = vesselData.timestamp ? ((Date.now() - vesselData.timestamp) / 1000).toFixed(0) : '?';
-		debugLog(`${label}: pos=${formatPosition(vesselData.position)}, ` +
+		debugLogVessel(vesselId, `pos=${formatPosition(vesselData.position)}, ` +
 			`cog=${formatCourse(vesselData.course)}, ` +
 			`sog=${formatSpeed(vesselData.speed)}, ` +
 			`age=${age}s`);
@@ -658,13 +700,13 @@ function createCollisionDetector(app, options) {
 		state.stats.cpaCalculations++;
 
 		if (!cpaResult) {
-			debugLog(`${vesselId}: CPA calc failed (missing course/speed data)`);
+			debugLogVessel(vesselId, `CPA calc failed (missing course/speed data)`);
 			return null;
 		}
 
 		// Skip diverging vessels
 		if (cpaResult.diverging) {
-			debugLog(`${vesselId}: Diverging, relSpeed=${formatSpeed(cpaResult.relativeSpeed)}`);
+			debugLogVessel(vesselId, `Diverging, relSpeed=${formatSpeed(cpaResult.relativeSpeed)}`);
 			return null;
 		}
 
@@ -675,25 +717,25 @@ function createCollisionDetector(app, options) {
 
 		const tcpaMinutes = cpaResult.tcpaSeconds / 60;
 
-		debugLog(`${vesselId}: CPA=${formatDistance(cpaResult.cpaDistance)}, ` +
+		debugLogVessel(vesselId, `CPA=${formatDistance(cpaResult.cpaDistance)}, ` +
 			`TCPA=${formatTime(cpaResult.tcpaSeconds)}, ` +
 			`relSpeed=${formatSpeed(cpaResult.relativeSpeed)}, ` +
 			`threshold=${formatDistance(threshold)}, ` +
 			`parallel=${cpaResult.parallelCourse}`);
 
 		if (cpaResult.cpaDistance > threshold) {
-			debugLog(`${vesselId}: Safe - CPA > threshold`);
+			debugLogVessel(vesselId, `Safe - CPA > threshold`);
 			return null; // Safe passing distance
 		}
 
 		// Check if TCPA is within time window
 		if (tcpaMinutes > options.timeWindowMinutes && !cpaResult.parallelCourse) {
-			debugLog(`${vesselId}: Safe - TCPA beyond window (${tcpaMinutes.toFixed(1)}min > ${options.timeWindowMinutes}min)`);
+			debugLogVessel(vesselId, `Safe - TCPA beyond window (${tcpaMinutes.toFixed(1)}min > ${options.timeWindowMinutes}min)`);
 			return null; // Too far in future
 		}
 
 		// Collision risk detected
-		debugLog(`${vesselId}: *** COLLISION RISK *** CPA=${formatDistance(cpaResult.cpaDistance)}, TCPA=${formatTime(cpaResult.tcpaSeconds)}`);
+		debugLogVessel(vesselId, `*** COLLISION RISK *** CPA=${formatDistance(cpaResult.cpaDistance)}, TCPA=${formatTime(cpaResult.tcpaSeconds)}`);
 
 		return {
 			method: 'CPA',
@@ -736,10 +778,10 @@ function createCollisionDetector(app, options) {
 			(options.safePassingDistanceMeters * 2);
 
 		const reason = !selfHasCourse ? 'own vessel missing COG/SOG' : 'target missing COG/SOG';
-		debugLog(`${vesselId}: Geometric fallback (${reason}), dist=${formatDistance(distance)}, threshold=${formatDistance(threshold)}`);
+		debugLogVessel(vesselId, `Geometric fallback (${reason}), dist=${formatDistance(distance)}, threshold=${formatDistance(threshold)}`);
 
 		if (distance != null && distance < threshold) {
-			debugLog(`${vesselId}: *** GEOMETRIC PROXIMITY ALERT *** dist=${formatDistance(distance)}`);
+			debugLogVessel(vesselId, `*** GEOMETRIC PROXIMITY ALERT *** dist=${formatDistance(distance)}`);
 			return {
 				method: 'GEOMETRIC',
 				distance: distance,
@@ -795,32 +837,32 @@ function createCollisionDetector(app, options) {
 			return;
 		}
 
-		logVesselInfo('Own vessel', selfVessel);
+		logVesselInfo(state.selfContext, selfVessel);
 
 		// Get target vessel data directly from SignalK
 		const targetVessel = getVesselData(targetVesselContext);
 		if (!targetVessel) {
-			debugLog(`${vesselId}: Target data not available`);
+			debugLogVessel(vesselId, `Target data not available`);
 			removeCollision(vesselId);
 			return;
 		}
 		if (!isDataFresh(targetVessel)) {
 			state.stats.skippedStaleData++;
-			debugLog(`${vesselId}: Target data stale (age=${((Date.now() - targetVessel.timestamp) / 1000).toFixed(0)}s)`);
+			debugLogVessel(vesselId, `Target data stale (age=${((Date.now() - targetVessel.timestamp) / 1000).toFixed(0)}s)`);
 			removeCollision(vesselId);
 			return;
 		}
 		if (!validateVesselData(targetVessel)) {
-			debugLog(`${vesselId}: Target data invalid`);
+			debugLogVessel(vesselId, `Target data invalid`);
 			removeCollision(vesselId);
 			return;
 		}
 
-		logVesselInfo(`Target ${vesselId}`, targetVessel);
+		logVesselInfo(vesselId, targetVessel);
 
 		// Check for position jump
 		if (checkPositionJump(vesselId, targetVessel)) {
-			debugLog(`${vesselId}: Skipped due to position jump`);
+			debugLogVessel(vesselId, `Skipped due to position jump`);
 			return; // Skip this update due to position jump
 		}
 
@@ -830,12 +872,12 @@ function createCollisionDetector(app, options) {
 
 		if (distance === null || distance > maxSearchRange) {
 			state.stats.skippedOutOfRange++;
-			debugLog(`${vesselId}: Out of range (dist=${formatDistance(distance)}, max=${formatDistance(maxSearchRange)})`);
+			debugLogVessel(vesselId, `Out of range (dist=${formatDistance(distance)}, max=${formatDistance(maxSearchRange)})`);
 			removeCollision(vesselId);
 			return;
 		}
 
-		debugLog(`${vesselId}: Processing - dist=${formatDistance(distance)}`);
+		debugLogVessel(vesselId, `Processing - dist=${formatDistance(distance)}`);
 
 		// Try CPA method first (primary)
 		let collision = checkCPACollision(selfVessel, targetVessel, vesselId);
@@ -854,11 +896,11 @@ function createCollisionDetector(app, options) {
 				position: targetVessel.position
 			};
 			if (!wasTracking) {
-				debugLog(`${vesselId}: Added to collision tracking`);
+				debugLogVessel(vesselId, `Added to collision tracking`);
 			}
 		} else {
 			if (wasTracking) {
-				debugLog(`${vesselId}: Removed from collision tracking`);
+				debugLogVessel(vesselId, `Removed from collision tracking`);
 			}
 			delete state.collisions[vesselId];
 		}
